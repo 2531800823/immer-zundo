@@ -1,4 +1,4 @@
-import { Patch, applyPatches, produceWithPatches } from "immer";
+import { Patch, applyPatches, produceWithPatches, enablePatches } from "immer";
 import {
   StateCreator,
   StoreApi,
@@ -6,33 +6,45 @@ import {
   createStore,
 } from "zustand";
 import { immer } from "zustand/middleware/immer";
+enablePatches();
+// 历史记录的最大存储数量
+const MAX_HISTORY_LIMIT = 10;
 
-const DEFAULT_LIMIT = 10;
-
-interface State {
-  pastStates: Patch[][][];
-  futureStates: Patch[][][];
+interface HistoryState {
+  undoStack: Patch[][][]; // 撤销栈
+  redoStack: Patch[][][]; // 重做栈
 }
 
-interface TemporalState {
+interface TimelineActions {
+  /** 撤销操作 */
   undo: (steps?: number) => void;
+  /** 重做操作 */
   redo: (steps?: number) => void;
+  /** 清空历史记录 */
   clear: () => void;
-
-  _handleSet: (pastState: Patch[][]) => void;
+  /** 处理状态变更 */
+  _handleStateChange: (patches: Patch[][]) => void;
 }
 
-type Zundo = <
+type ImmerZundoMiddleware = <
   TState,
   Mps extends [StoreMutatorIdentifier, unknown][] = [],
   Mcs extends [StoreMutatorIdentifier, unknown][] = []
 >(
-  config: StateCreator<TState, [...Mps, ["temporal", unknown]], Mcs>,
+  config: StateCreator<
+    TState,
+    [...Mps, ["temporal", unknown], ["zustand/immer", never]],
+    Mcs
+  >,
   options?: any
 ) => StateCreator<
   TState,
   Mps,
-  [["temporal", StoreApi<TemporalState & State>], ...Mcs]
+  [
+    ["temporal", StoreApi<TimelineActions & HistoryState>],
+    ["zustand/immer", never],
+    ...Mcs
+  ]
 >;
 
 export type Write<T, U> = Omit<T, keyof U> & U;
@@ -42,55 +54,55 @@ declare module "zustand/vanilla" {
   }
 }
 
-export const immerZundo = (<T>(initializer: StateCreator<T, [], []>) => {
+export const zustandPatchUndo = (<T>(initializer: StateCreator<T, [], []>) => {
   const fn = (
     set: StoreApi<T>["setState"],
     get: StoreApi<T>["getState"],
-    store: StoreApi<T> & { temporal: StoreApi<TemporalState & State> }
+    store: StoreApi<T> & { temporal: StoreApi<TimelineActions & HistoryState> }
   ) => {
-    // 做一些插件处理
-    store.temporal = createStore<TemporalState & State>()(
-      immer((set1, get1) => {
-        const initialState: State = {
-          pastStates: [],
-          futureStates: [],
+    // 创建时间线存储
+    store.temporal = createStore<TimelineActions & HistoryState>()(
+      immer((setHistory, getHistory) => {
+        const initialState: HistoryState = {
+          undoStack: [],
+          redoStack: [],
         };
         return {
           ...initialState,
           undo: () => {
-            if (get1().pastStates.length) {
-              set1((state) => {
-                const inversePatches = state.pastStates.pop()!;
+            if (getHistory().undoStack.length) {
+              setHistory((state) => {
+                const lastPatches = state.undoStack.pop()!;
                 const newState = applyPatches(
                   get() as StoreApi<T>["getState"],
-                  inversePatches[1]
+                  lastPatches[1]
                 );
                 set(newState);
-                state.futureStates.push(inversePatches);
+                state.redoStack.push(lastPatches);
               });
             }
           },
           redo: () => {
-            if (get1().futureStates.length) {
-              set1((state) => {
-                const patches = state.futureStates.pop()!;
+            if (getHistory().redoStack.length) {
+              setHistory((state) => {
+                const nextPatches = state.redoStack.pop()!;
                 const newState = applyPatches(
                   get() as StoreApi<T>["getState"],
-                  patches[0]
+                  nextPatches[0]
                 );
                 set(newState);
-                state.pastStates.push(patches);
+                state.undoStack.push(nextPatches);
               });
             }
           },
-          clear: () => set1({ pastStates: [], futureStates: [] }),
-          _handleSet: (pastState) => {
-            set1((state) => {
-              if (state.pastStates.length >= DEFAULT_LIMIT) {
-                state.pastStates.shift();
+          clear: () => setHistory({ undoStack: [], redoStack: [] }),
+          _handleStateChange: (patches) => {
+            setHistory((state) => {
+              if (state.undoStack.length >= MAX_HISTORY_LIMIT) {
+                state.undoStack.shift();
               }
-              state.futureStates = [];
-              state.pastStates.push(pastState);
+              state.redoStack = []; // 清空重做栈
+              state.undoStack.push(patches);
             });
           },
         };
@@ -105,16 +117,20 @@ export const immerZundo = (<T>(initializer: StateCreator<T, [], []>) => {
       const [nextState, patches, inversePatches] =
         typeof updater === "function"
           ? produceWithPatches(pastState, updater)
-          : updater;
+          : produceWithPatches(pastState, (draft) => {
+              Object.keys(updater).forEach((item) => {
+                (draft as Record<string, any>)[item] = updater[item];
+              });
+            });
 
       setState(nextState, replace, ...a);
 
       // 更新 设置缓存
-      store.temporal.getState()._handleSet([patches, inversePatches]);
+      store.temporal.getState()._handleStateChange([patches, inversePatches]);
     };
 
     return initializer(store.setState, get, store);
   };
 
   return fn;
-}) as Zundo;
+}) as ImmerZundoMiddleware;

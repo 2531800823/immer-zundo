@@ -1,11 +1,12 @@
 import { create } from "zustand";
-import { immerZundo } from "./plugin";
+import { zustandPatchUndo } from "./plugin";
 
 export const useStoreWithUndo = create()(
-  immerZundo((set) => ({
-    bears: 0,
-    increasePopulation: () => set((state) => ({ bears: state.bears + 1 })),
-    removeAllBears: () => set({ bears: 0 }),
-    updateBears: (newBears) => set({ bears: newBears }),
+  zustandPatchUndo((set) => ({
+    count: 0,
+    text: "",
+    increase: () => set((state) => ({ count: state.count + 1 })),
+    decrease: () => set((state) => ({ count: state.count - 1 })),
+    setText: (text: string) => set({ text }),
   }))
 );
