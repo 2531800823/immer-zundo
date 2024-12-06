@@ -1,50 +1,111 @@
-# React + TypeScript + Vite
+# immer-zundo
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+一个基于 immer 和 zustand 的状态管理插件，为您的 React 应用提供简单而强大的撤销/重做功能。
 
-Currently, two official plugins are available:
+## 核心特点
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+本插件基于 Immer 的 Patches 系统实现状态追踪，区别于传统的全量状态存储方案：
 
-## Expanding the ESLint configuration
+- 🔍 **高效的差异记录**: 只记录状态变更的 diff 信息，而不是存储完整状态副本
+- 📦 **更小的内存占用**: 通过 Patches 系统精确追踪修改，显著减少内存使用
+- ⚡ **快速的状态恢复**: 基于 diff 补丁的快速应用和回滚
+- 🎯 **精确的状态追踪**: 准确记录每一个细微的状态变化
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+## 致谢
 
-- Configure the top-level `parserOptions` property like this:
+本项目受到以下优秀开源项目的启发：
 
-```js
-export default tseslint.config({
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+- [Zustand](https://github.com/pmndrs/zustand) - 简单、快速且可扩展的状态管理解决方案
+- [Immer](https://github.com/immerjs/immer) - 不可变状态管理库
+- [Zundo](https://github.com/charkour/zundo) - Zustand 的撤销/重做中间件
+
+## 特性
+
+- 🚀 简单易用 - 无缝集成到现有的 zustand store
+- 💪 类型安全 - 完整的 TypeScript 支持
+- 🔄 撤销/重做功能 - 轻松管理状态历史
+- ⚡️ 高性能 - 基于 immer 的高效状态更新
+- 🎯 精确控制 - 可以针对特定状态变更进行撤销/重做
+
+## 安装
+
+```bash
+npm install immer-zundo
 ```
 
-- Replace `tseslint.configs.recommended` to `tseslint.configs.recommendedTypeChecked` or `tseslint.configs.strictTypeChecked`
-- Optionally add `...tseslint.configs.stylisticTypeChecked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and update the config:
+## 基础使用
 
-```js
-// eslint.config.js
-import react from 'eslint-plugin-react'
+```typescript
+import { create } from 'zustand'
+import { withZundo } from 'immer-zundo'
 
-export default tseslint.config({
-  // Set the react version
-  settings: { react: { version: '18.3' } },
-  plugins: {
-    // Add the react plugin
-    react,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended rules
-    ...react.configs.recommended.rules,
-    ...react.configs['jsx-runtime'].rules,
-  },
-})
+interface State {
+  count: number
+}
+
+const useStore = create(
+  withZundo<State>((set) => ({
+    count: 0,
+    increment: () => set((state) => ({ count: state.count + 1 })),
+    decrement: () => set((state) => ({ count: state.count - 1 })),
+  }))
+)
+
+// 在组件中使用
+function Counter() {
+  const { count, increment, decrement } = useStore()
+  const { undo, redo } = useStore.zundo()
+
+  return (
+    <div>
+      <button onClick={undo}>撤销</button>
+      <button onClick={redo}>重做</button>
+      <button onClick={increment}>+1</button>
+      <button onClick={decrement}>-1</button>
+      <span>Count: {count}</span>
+    </div>
+  )
+}
 ```
+
+## API
+
+### withZundo
+
+主要的插件函数，用于增强 zustand store。
+
+```typescript
+withZundo<T>(config: StoreConfig<T>)
+```
+
+### useStore.zundo()
+
+提供撤销/重做功能的 hook。
+
+返回值：
+- `undo()`: 撤销上一次操作
+- `redo()`: 重做上一次操作
+- `history`: 当前历史记录状态
+
+## 开发计划
+
+未来我们计划添加以下功能：
+
+1. 📋 更丰富的测试用例
+   - 添加更多边界情况的测试
+   - 提供更完整的集成测试
+   - 添加性能测试基准
+
+2. ⚙️ 自定义配置项支持
+   - 历史记录长度限制
+   - 状态过滤器配置
+   - 自定义序列化选项
+   - 状态合并策略配置
+
+## 贡献指南
+
+欢迎提交 Issue 和 Pull Request！
+
+## 许可证
+
+MIT

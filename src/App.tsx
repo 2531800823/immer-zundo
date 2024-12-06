@@ -1,7 +1,6 @@
-import { enableMapSet, enablePatches } from "immer";
+import { enablePatches } from "immer";
 import { useStoreWithUndo } from "./store";
 
-enableMapSet();
 enablePatches();
 
 const App = () => {
