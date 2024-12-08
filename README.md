@@ -1,110 +1,90 @@
 # immer-zundo
 
-一个基于 immer 和 zustand 的状态管理插件，为您的 React 应用提供简单而强大的撤销/重做功能。
+一个基于 Immer 的 patch 特性的轻量级状态管理解决方案，具有撤销/重做功能。受 [zundo](https://github.com/charkour/zundo) 库的启发。
 
 ## 核心特点
 
-本插件基于 Immer 的 Patches 系统实现状态追踪，区别于传统的全量状态存储方案：
+- 🎯 使用 Immer 的 patch 特性实现高效的状态管理
+- ⚡ 只存储状态差异（patches），而不是完整的状态副本
+- 🔄 内置撤销/重做功能
+- 🎮 轻松集成到现有的 Zustand 存储中
+- 📦 小型包大小
+- 💪 TypeScript 支持
 
-- 🔍 **高效的差异记录**: 只记录状态变更的 diff 信息，而不是存储完整状态副本
-- 📦 **更小的内存占用**: 通过 Patches 系统精确追踪修改，显著减少内存使用
-- ⚡ **快速的状态恢复**: 基于 diff 补丁的快速应用和回滚
-- 🎯 **精确的状态追踪**: 准确记录每一个细微的状态变化
+## 为什么使用 Patches？
 
-## 致谢
-
-本项目受到以下优秀开源项目的启发：
-
-- [Zustand](https://github.com/pmndrs/zustand) - 简单、快速且可扩展的状态管理解决方案
-- [Immer](https://github.com/immerjs/immer) - 不可变状态管理库
-- [Zundo](https://github.com/charkour/zundo) - Zustand 的撤销/重做中间件
-
-## 特性
-
-- 🚀 简单易用 - 无缝集成到现有的 zustand store
-- 💪 类型安全 - 完整的 TypeScript 支持
-- 🔄 撤销/重做功能 - 轻松管理状态历史
-- ⚡️ 高性能 - 基于 immer 的高效状态更新
-- 🎯 精确控制 - 可以针对特定状态变更进行撤销/重做
+与存储完整的状态快照相比，这个库使用 Immer 的 patch 特性来存储状态之间的差异（patches）。这种方法显著减少了内存使用量并提高了性能，特别是在处理大型状态对象时。
 
 ## 安装
 
 ```bash
 npm install immer-zundo
+# 或
+yarn add immer-zundo
 ```
 
 ## 基础使用
 
 ```typescript
-import { create } from 'zustand'
-import { withZundo } from 'immer-zundo'
+import { create } from "zustand";
+import { withZundo } from "immer-zundo";
 
-interface State {
-  count: number
-}
-
+// 创建一个具有撤销/重做功能的存储
 const useStore = create(
-  withZundo<State>((set) => ({
+  withZundo((set) => ({
     count: 0,
-    increment: () => set((state) => ({ count: state.count + 1 })),
-    decrement: () => set((state) => ({ count: state.count - 1 })),
+    text: "",
+    increase: () => set((state) => ({ count: state.count + 1 })),
+    decrease: () => set((state) => ({ count: state.count - 1 })),
+    setText: (text: string) => set({ text }),
   }))
-)
+);
 
 // 在组件中使用
-function Counter() {
-  const { count, increment, decrement } = useStore()
-  const { undo, redo } = useStore.zundo()
+const MyComponent = () => {
+  const { count, text, increase, decrease, setText } = useStore();
+  const { undo, redo, clear } = useStore.zundo();
 
   return (
-    <div>
-      <button onClick={undo}>撤销</button>
-      <button onClick={redo}>重做</button>
-      <button onClick={increment}>+1</button>
-      <button onClick={decrement}>-1</button>
-      <span>Count: {count}</span>
-    </div>
-  )
-}
+    <>
+      <div>Count: {count}</div>
+      <div>Text: {text}</div>
+      <button onClick={increase}>Increase</button>
+      <button onClick={decrease}>Decrease</button>
+      <button onClick={() => setText("hello")}>Set Text</button>
+      <button onClick={undo}>Undo</button>
+      <button onClick={redo}>Redo</button>
+      <button onClick={clear}>Clear History</button>
+    </>
+  );
+};
 ```
 
 ## API
 
 ### withZundo
 
-主要的插件函数，用于增强 zustand store。
+一个用于增强 Zustand 存储的中间件，添加撤销/重做功能。
 
-```typescript
-withZundo<T>(config: StoreConfig<T>)
-```
+### 存储方法
 
-### useStore.zundo()
+临时存储提供以下方法：
 
-提供撤销/重做功能的 hook。
+- `undo()`: 撤销到上一个状态
+- `redo()`: 应用下一个状态（如果可用）
+- `clear()`: 清除撤销/重做历史
 
-返回值：
-- `undo()`: 撤销上一次操作
-- `redo()`: 重做上一次操作
-- `history`: 当前历史记录状态
+### 配置
 
-## 开发计划
+默认情况下，历史记录限制为 10 个状态。可以通过修改源代码中的 `MAX_HISTORY_LIMIT` 常量来更改此限制。
 
-未来我们计划添加以下功能：
+## 工作原理
 
-1. 📋 更丰富的测试用例
-   - 添加更多边界情况的测试
-   - 提供更完整的集成测试
-   - 添加性能测试基准
-
-2. ⚙️ 自定义配置项支持
-   - 历史记录长度限制
-   - 状态过滤器配置
-   - 自定义序列化选项
-   - 状态合并策略配置
-
-## 贡献指南
-
-欢迎提交 Issue 和 Pull Request！
+1. 当状态发生变化时，Immer 的 `produceWithPatches` 生成 patches 和逆向 patches
+2. 只存储这些 patches 在历史栈中，而不是完整的状态副本
+3. `undo` 操作应用逆向 patches 来撤销更改
+4. `redo` 操作应用正向 patches 来恢复更改
+5. 新的状态更改清除 redo 栈以维护线性历史
 
 ## 许可证
 
