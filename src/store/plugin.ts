@@ -6,9 +6,25 @@ import {
   createStore,
 } from "zustand";
 import { immer } from "zustand/middleware/immer";
+import { isPathIncluded } from "../common/isPathIncluded";
 enablePatches();
 // 历史记录的最大存储数量
 const MAX_HISTORY_LIMIT = 10;
+
+type NestedPaths<T, P extends string[] = []> = T extends object
+  ? {
+      [K in keyof T]: NestedPaths<T[K], [...P, K & string]>;
+    }[keyof T]
+  : P;
+
+/** 配置项 */
+export interface Options<TState, PartialTState = TState> {
+  /** 最大缓存, default 10 */
+  limit?: number;
+  partialize?: (state: TState) => PartialTState;
+  exclude?: NestedPaths<TState>[];
+  include?: NestedPaths<TState>[];
+}
 
 interface HistoryState {
   undoStack: Patch[][][]; // 撤销栈
@@ -29,14 +45,15 @@ interface TimelineActions {
 type ImmerZundoMiddleware = <
   TState,
   Mps extends [StoreMutatorIdentifier, unknown][] = [],
-  Mcs extends [StoreMutatorIdentifier, unknown][] = []
+  Mcs extends [StoreMutatorIdentifier, unknown][] = [],
+  UState = TState
 >(
   config: StateCreator<
     TState,
     [...Mps, ["temporal", unknown], ["zustand/immer", never]],
     Mcs
   >,
-  options?: any
+  options?: Options<TState, UState>
 ) => StateCreator<
   TState,
   Mps,
@@ -54,7 +71,10 @@ declare module "zustand/vanilla" {
   }
 }
 
-export const zustandPatchUndo = (<T>(initializer: StateCreator<T, [], []>) => {
+export const zustandPatchUndo = (<T>(
+  initializer: StateCreator<T, [], []>,
+  options: Options<T> = {}
+) => {
   const fn = (
     set: StoreApi<T>["setState"],
     get: StoreApi<T>["getState"],
@@ -70,39 +90,56 @@ export const zustandPatchUndo = (<T>(initializer: StateCreator<T, [], []>) => {
         return {
           ...initialState,
           undo: () => {
-            if (getHistory().undoStack.length) {
-              setHistory((state) => {
-                const lastPatches = state.undoStack.pop()!;
-                const newState = applyPatches(
-                  get() as StoreApi<T>["getState"],
-                  lastPatches[1]
-                );
-                set(newState);
-                state.redoStack.push(lastPatches);
-              });
-            }
+            setHistory((state) => {
+              if (!state.undoStack.length) {
+                return;
+              }
+
+              const lastPatches = state.undoStack.pop()!;
+
+              const currentState = get() as StoreApi<T>["getState"];
+
+              const newState = applyPatches(currentState, lastPatches[1]);
+
+              set(newState);
+
+              state.redoStack.push(lastPatches);
+            });
           },
           redo: () => {
-            if (getHistory().redoStack.length) {
-              setHistory((state) => {
-                const nextPatches = state.redoStack.pop()!;
-                const newState = applyPatches(
-                  get() as StoreApi<T>["getState"],
-                  nextPatches[0]
-                );
-                set(newState);
-                state.undoStack.push(nextPatches);
-              });
-            }
+            setHistory((state) => {
+              if (!state.redoStack.length) {
+                return;
+              }
+
+              const currentState = get() as StoreApi<T>["getState"];
+
+              const nextPatches = state.redoStack.pop()!;
+              const newState = applyPatches(currentState, nextPatches[0]);
+              set(newState);
+              state.undoStack.push(nextPatches);
+            });
           },
           clear: () => setHistory({ undoStack: [], redoStack: [] }),
           _handleStateChange: (patches) => {
             setHistory((state) => {
-              if (state.undoStack.length >= MAX_HISTORY_LIMIT) {
+              if (
+                state.undoStack.length >= (options?.limit ?? MAX_HISTORY_LIMIT)
+              ) {
                 state.undoStack.shift();
               }
               state.redoStack = []; // 清空重做栈
-              state.undoStack.push(patches);
+              // 过滤 ignorePaths 忽略字段
+              // [patches, inversePatches]
+              const filteredPatches = filterPatches(
+                patches,
+                options.exclude,
+                options.include
+              );
+
+              console.log("🚀 liu123 ~ filteredPatches:", filteredPatches);
+              // 删除记录中不需要缓存的值
+              state.undoStack.push(filteredPatches);
             });
           },
         };
@@ -124,6 +161,12 @@ export const zustandPatchUndo = (<T>(initializer: StateCreator<T, [], []>) => {
             });
 
       setState(nextState, replace, ...a);
+      console.log(
+        "🚀 liu123 ~ nextState, patches, inversePatches:",
+        nextState,
+        patches,
+        inversePatches
+      );
 
       // 更新 设置缓存
       store.temporal.getState()._handleStateChange([patches, inversePatches]);
@@ -134,3 +177,21 @@ export const zustandPatchUndo = (<T>(initializer: StateCreator<T, [], []>) => {
 
   return fn;
 }) as ImmerZundoMiddleware;
+
+function filterPatches(
+  patches: Patch[][],
+  exclude?: string[][],
+  include?: string[][]
+) {
+  if (!exclude) {
+    return patches;
+  }
+  const [patchesItem, inversePatchesItem] = patches;
+  const filteredPatches = patchesItem.filter((patch) =>
+    isPathIncluded(patch, exclude, include)
+  );
+  const filteredInversePatches = inversePatchesItem.filter((inversePatch) =>
+    isPathIncluded(inversePatch, exclude, include)
+  );
+  return [filteredPatches, filteredInversePatches];
+}
